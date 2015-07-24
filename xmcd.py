@@ -63,10 +63,11 @@ point =[int(i) for i in list(raw_input("enter an x and y coordinate: ").split(',
 pixel_list = [5,8,10,15,20]
 def producedata(image_list, pixel_list,number):
 	for pixel in pixel_list:
-		for num in range(number):
+		for num in range(1,number+1):
 			intens =[]
 			list_intensities= []
 			intensleft = []
+			print num
 			intensright = []
 			for i in range(len(image_list)):
 				list_intensities.append(calculate_nth_average_intensity(image_list[i],point,pixel,num))
@@ -77,6 +78,9 @@ def producedata(image_list, pixel_list,number):
 			fileref= open(str(point[1])+"_"+str(point[0])+"_" + str(num) +"_area_"+str(pixel) +".csv" ,'w')
 			for k in range(len(photon_energies)):
 				fileref.write(str(photon_energies[k]) + " " + str(intens[k]) + " " + str(intensleft[k]) +" " +str(intensright[k]) +"\n")
+			plt.plot(photon_energies, intens)
+			plt.savefig(str(point[1]) + "_" +str(point[0]) + "_" + str(num) +"_area_" +str(pixel))
+			plt.close()
 			fileref.close()
 
 producedata(list_images,pixel_list,5	)
