@@ -1,7 +1,6 @@
 #lets gooooo. Author: Christopher Agostino
 import numpy as np
 import os
-import osgeo
 import scipy
 import gdal
 import matplotlib.pyplot as plt
@@ -10,6 +9,8 @@ from lmfit.models import GaussianModel
 from lmfit.models import VoigtModel
 #import pyfits
 import gc
+from numpy import trapz
+from scipy.integrate import simps
 plt.rc('text',usetex=True)
 #make these plots look dank
 plt.rc('font',family='serif')
@@ -17,8 +18,7 @@ l = os.listdir("left/")
 r =os.listdir("right/")
 l.sort()
 r.sort()
-from numpy import trapz
-from scipy.integrate import simps
+
 def read_dat(filename):
 	fil = np.loadtxt(filename, skiprows=1)
 	return fil.transpose()
@@ -28,45 +28,20 @@ def assign_images(lst = None):
 	new_array_l =[]
 	file_list_l =[]
 	for fil in l:
-		if fil.endswith(".fits"):
-			new_array_l.append(pyfits.open('left/'+fil)[0].data)
-			file_list_l.append(fil)
-		elif fil.endswith(".tif"):
+		if fil.endswith(".tif"):
 			new =gdal.Open('left/'+fil)
-
 			new_array_l.append(scipy.array(new.GetRasterBand(1).ReadAsArray()))
 			file_list_l.append(fil)
 	for fil in r:
-		if fil.endswith(".fits"):
-			new_array_r.append(pyfits.open('right/'+fil)[0].data)
-			file_list_r.append(fil)
-		elif fil.endswith(".tif"):
+		if fil.endswith(".tif"):
 			new =gdal.Open('right/'+fil)
-
 			new_array_r.append(scipy.array(new.GetRasterBand(1).ReadAsArray()))
 			file_list_r.append(fil)	
 	return [file_list_l,file_list_r, new_array_l,new_array_r]
-list_images_l = assign_images()[2]
-list_images_r = assign_images()[3]
-
-list_files_l = assign_images()[0]
-list_files_r = assign_images()[1]
-
+list_files_l,list_files_r , list_images_l, list_images_r = assign_images()
 photon_energies = []
 for i in list_files_l:
-	if 'fits' in i:
-		#if '_L' in i:
-		#	i = i.replace("_L.fits","")
-		if '_R' in i:
-			i = i.replace("_R.fits","")
-		else:
-		
-			i=i.replace(".fits","")
-		if "_" in i:
-			i=i.replace("_",'.')
 	if 'tif' in i:
-		#if '_L' in i:
-		#	i = i.replace("_L.tif","")
 		if '_R' in i:
 			i = i.replace("_R.tif","")	
 		else:
@@ -92,9 +67,8 @@ def calculate_nth_average_intensity(image_left,image_right,coordinate, size, num
 	norm_l =[]
 	x, y = coordinate
 	norm_r =[]
-	#determine best normalization given a point
-	
-	diff_1 =np.array( [])
+	#determines best normalization given a certain point, not usually necessary
+	diff_1 = np.array([])
 	diff_2 = np.array([])
 	if det:	
 		for a in range(coordinate[0]-5,coordinate[0]+5):
@@ -127,33 +101,34 @@ def calculate_nth_average_intensity(image_left,image_right,coordinate, size, num
 		x+=choice
 		if phot_e == 778.0:
 			print choice,x
+	#now for actual xmcd calculation
 	norm_l =[]
 	norm_r =[]
-	for j in range(-size,size+1):
+	#gets the left and right normalizations
+	for j in range(-size,size+1): 
 		for i in range(size):
 			norm_l.append(image_left[y+i][x+j])
 			norm_r.append(image_right[y+i][x+j])
-	norm_l, norm_r = np.array(norm_l),np.array(norm_r)
+	#turn them into numpy arrays idk why
+	norm_l, norm_r = np.array(norm_l),np.array(norm_r) 
+	#set them equal to their mean to subtract from the XMCD later on
 	norm_l =np.mean(norm_l)
 	norm_r = np.mean(norm_r)
+	
 	back = (norm_l+norm_r)
+	#overall background
+	#now get the actual xray absorption curves for each
+	# does the right polarized images
 	while count_x < size:
 		intensities_right.append(image_right[y][x+direct*count_x+size*(number-1)])
+		intensities_left.append(image_left[y][x+direct*count_x+direct*size*(number-1)])
 		count_y = 1
 		while count_y < size:
 			intensities_right.append(image_right[y+count_y][x+direct*count_x+direct*size*(number-1)])
+		    intensities_left.append(image_left[y+count_y][x+direct*count_x+direct*size*(number-1)])
 			count_y+=1
-		count_x +=1 
-	count_x =0
-	while count_x<size:
-                intensities_left.append(image_left[y][x+direct*count_x+direct*size*(number-1)])
-                count_y = 1
-                while count_y < size:
-                        intensities_left.append(image_left[y+count_y][x+direct*count_x+direct*size*(number-1)])
-      	                count_y+=1
-                count_x +=1
+		count_x +=1 	
 	intens_left=np.sum(intensities_left)/abs(count_x*count_y)#-norm_l
-	
 	intens_right = np.sum(intensities_right)/(abs(count_x)*count_y)#-norm_r
 	xmcd= intens_left-intens_right
 	intens=(intens_left-norm_l) -(intens_right-norm_r)
@@ -161,31 +136,33 @@ def calculate_nth_average_intensity(image_left,image_right,coordinate, size, num
 	I_plus = sum_l_r/2. + intens/2.
 	I_minus = sum_l_r/2. -intens/2.
 	return [intens,I_plus, I_minus,intens_left, intens_right,norm_l, norm_r,intens_left-norm_l, intens_right-norm_r] 
-
 #point1=[153,774]
 #point =[int(i) for i in list(raw_input("enter an x and y coordinate: ").split(','))]
-
 def lorentzfit(photon_e, xmcd):
-	
+	#performs a single peak lorentzian fit on data
 	mod = LorentzianModel()
 	pars = mod.guess(xmcd, x=photon_e)
 	out  = mod.fit(xmcd, pars, x=photon_e)
 	return out.best_fit
 def gauss(photon_e, xmcd):
+	#performs single peak gaussian fit on data
 	mod= GaussianModel()
 	pars = mod.guess(xmcd, x=photon_e)
 	out=mod.fit(xmcd, pars,x=photon_e)
 	return out.best_fit
 def voigt(photon_e, xmcd):
+	#performs single peak voigt fit on data
 	mod =VoigtModel()
 	pars = mod.guess(xmcd, x= photon_e)
 	out=mod.fit(xmcd, pars, x=photon_e)
 	return out.best_fit
 def ls_ratio(a3,a2):
+	#using sum rules, calculates the L/S ratio
 	ls=(2*(a3+a2))/(3*(a3-2*a2))
 	return ls
 pixel_list = [5,8,10,15]
 def producedata(image_list_l,image_list_r, pixel_list,number,point,direct=1,det=0):
+	#produces lots of xmcd curves for a given point using different sizes for averaging and different distances 
 	totxmcd=[]	
 	for pixel in pixel_list:
 		for num in range(1,number+1):
@@ -203,6 +180,7 @@ def producedata(image_list_l,image_list_r, pixel_list,number,point,direct=1,det=
 			for i in range(len(image_list_r)):
 				if photon_energies[i] == 778.0: print photon_energies[i]
 				list_intensities.append(calculate_nth_average_intensity(image_list_l[i],image_list_r[i],point,pixel,num,direct=direct,det=det,phot_e = photon_energies[i]))
+			#assign all useful info from calculations
 			for j in range(len(list_intensities)):
 				intens.append(list_intensities[j][0])
 				intensleft.append(list_intensities[j][1])
@@ -223,17 +201,14 @@ def producedata(image_list_l,image_list_r, pixel_list,number,point,direct=1,det=
 			abs_l = -np.log(back_l)
 			abs_r = -np.log(back_r)
 			#writing them to files
+			#SUBTRACTING  A LINEAR FIT OF THE START AND END PART BECAUSE THEY ARE SUPPOSED TO BE ZERO
 			tes,xtes = np.array(xmcd[0:30]), np.array(photon_energies[0:30])
 			tes,xtes= np.append(tes,xmcd[-10:]), np.append(xtes, photon_energies[-10:])
 			m, yint = np.polyfit(xtes, tes,1)
-		
+			#ZEROED XMCD
 			xmcd = xmcd- np.array(photon_energies) *m-yint #trying to do linear fit
 	
-			'''mod = LorentzianModel()
-			photon_e = np.array(photon_energies)
-			pars= mod.guess(xmcd, x=photon_e)
-			out= mod.fit(xmcd, pars, x=photon_e)
-			lorentzfit_top = out.best_fit'''
+			
 			#doing a lorentzian fit on them for the double peaks
 			lorentzfit_top = lorentzfit(np.array(photon_energies)[-45:], xmcd[-45:])
 			lorentzfit_bot = lorentzfit(np.array(photon_energies[:-40]), xmcd[:-40])
@@ -286,11 +261,8 @@ def producedata(image_list_l,image_list_r, pixel_list,number,point,direct=1,det=
 		 	
 			ls_trapz_voigt = ls_ratio(integ_voigt_top_trapz,integ_voigt_bot_trapz)
 			ls_simps_voigt = ls_ratio(integ_voigt_top_simps, integ_voigt_bot_simps)
-				
-			if direct==1:
-				dirstr = 'r'
-			elif direct==-1:
-				dirstr='l'
+			directions = {1:'r',-1:'l'}
+			dirstr = directions[direct]
 			fold = str(point[0])+"_"+str(point[1]) 
 			if fold not in os.listdir("."):
 				os.mkdir(fold)
@@ -300,77 +272,6 @@ def producedata(image_list_l,image_list_r, pixel_list,number,point,direct=1,det=
 			for k in range(len(photon_energies)):
 				fileref.write(str(photon_energies[k]) + " " + str(intens[k]) + " " + str(back_l[k]) +" " +str(back_r[k])+" " 
 					+str(xmcd[k]) +" "+str(combo_l[k])+" "+str(combo_r[k]) +" " +str(abs_l[k]) + " " +str(abs_r[k])+" "+str(norm_l[k]) + " " +str(norm_r[k]) +" " +str(lorentz_tot[k])+" " +str(gaussfit_tot[k])+" " +str(voigtfit_tot[k])+" " +str(ls_simps_lor)+" " +str(ls_trapz_lor)+" " +str(ls_simps_gauss)+" " +str(ls_trapz_gauss)+" " +str(ls_simps_voigt)+" " +str(ls_trapz_voigt)+ "\n")
-			'''
-			plt.plot(photon_energies, combo_r,label='absorption')
-
-			plt.close()
-			plt.plot(photon_energies, combo_l,label='absorption')
-			plt.title('combined left', size=20)
-			plt.xlabel('Phot on Energies [eV]',size =20)
-			plt.ylabel('Intensity',size=20)
-			#plt.legend(loc=2)
-			plt.savefig(str(point[0]) + "_" +str(point[1]) + "_" + str(num) +"_area_" +str(pixel)+'combo_l.png')#,dpi=500)
-			plt.close()
-
-			plt.plot(photon_energies, abs_r,label='absorption')
-			plt.xlabel('Photon Energies [eV]',size =20)
-			plt.title('absorption right', size=20)
-			plt.ylabel('Intensity',size=20)
-			#plt.legend(loc=2)
-			plt.savefig(str(point[0]) + "_" +str(point[1]) + "_" + str(num) +"_area_" +str(pixel)+'absorption_r.png')#,dpi=500)
-			plt.close()
-			plt.plot(photon_energies, abs_l,label='absorption')
-			plt.title('absorption left', size=20)
-			plt.xlabel('Photon Energies [eV]',size =20)
-			plt.ylabel('Intensity',size=20)
-			#plt.legend(loc=2)
-			plt.savefig(str(point[0]) + "_" +str(point[1]) + "_" + str(num) +"_area_" +str(pixel)+'absorption_l.png')#,dpi=500)
-			plt.close()
-			'''
-			'''
-	
-			plt.plot(photon_energies, xmcd,'o',label='absorption')
-			plt.plot(photon_energies, lorentz_tot,label='absorption')
-			plt.title('xmcd', size=20)
-			plt.xlabel('Photon Energies [eV]',size =20)
-			plt.ylabel('Intensity',size=20)
-			#plt.legend(loc=2)
-			plt.savefig(str(point[0]) + "_" +str(point[1]) + "_" + str(num) +"_area_" +str(pixel)+'xmcd.png')#,dpi=500)
-			plt.close()
-			'''
-			'''
-			plt.plot(photon_energies, back_l,label='absorption')
-			plt.title('raw left', size=20)
-			plt.xlabel('Photon Energies [eV]',size =20)
-			plt.ylabel('Intensity',size=20)
-			#plt.legend(loc=2)
-			plt.savefig(str(point[0]) + "_" +str(point[1]) + "_" + str(num) +"_area_" +str(pixel)+'raw_l.png')#,dpi=500)
-			#if num == 2 and pixel == 8:   plt.show()	
-			plt.close()
-			plt.plot(photon_energies, back_r,label='absorption')
-			plt.title('raw right', size=20)
-			plt.xlabel('Photon Energies [eV]',size =20)
-			plt.ylabel('Intensity',size=20)
-			#plt.legend(loc=2)
-			plt.savefig(str(point[0]) + "_" +str(point[1]) + "_" + str(num) +"_area_" +str(pixel)+'raw_r.png')#,dpi=500)
-			plt.close()	
-
-			plt.plot(photon_energies, norm_l,label='absorption')
-			plt.title('backround left', size=20)
-			plt.xlabel('Photon Energies [eV]',size =20)
-			plt.ylabel('Intensity',size=20)
-			#plt.legend(loc=2)
-			plt.savefig(str(point[0]) + "_" +str(point[1]) + "_" + str(num) +"_area_" +str(pixel)+'norm_l.png')#,dpi=500)
-
-			plt.close()
-			plt.plot(photon _energies, norm_r,label='absorption')
-			plt.title('background right', size=20)
-			plt.xlabel('Photon Energies [eV]',size =20)
-			plt.ylabel('Intensity',size=20)
-			#plt.legend(loc=2)
-			plt.savefig(str(point[0]) + "_" +str(point[1]) + "_" + str(num) +"_area_" +str(pixel)+'norm_r.png')#,dpi=500)
-			plt.close()	
-					'''
 			fileref.close()
 			del back_l
 			del back_r
@@ -380,158 +281,4 @@ def producedata(image_list_l,image_list_r, pixel_list,number,point,direct=1,det=
 			del abs_l
 			del norm_l
 			del norm_r
-			''' '''
-	
 	return totxmcd
-
-#coord=[749, 543]
-#producedata(list_images_l, list_images_r, pixel_list, 4, coord)
-#right
-
-xmcdr_1 = producedata(list_images_l,list_images_r, pixel_list, 4, [341,620],direct=1,det=0)
-
-xmcdr_2 =producedata(list_images_l,list_images_r, pixel_list, 4, [652,501],direct=-1,det=0)
-xmcdr_3 =producedata(list_images_l,list_images_r, pixel_list, 4, [532,518],direct=1,det=0)
-xmcdr_4 =producedata(list_images_l,list_images_r, pixel_list, 4, [833,620],direct=1,det=0)
-'''
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,525],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,525],direct=-1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,530],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,530],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [335,535],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [335,535],direct=-1,det=0)
-
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,540],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,540],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,545],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,545],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,550],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,550],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,555],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,555],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,560],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [335,560],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [338,565],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [338,565],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,570],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [334,570],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [337,575],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [337,575],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,590],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,590],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,595],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,595],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,600],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,600],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,605],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,605],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,610],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,610],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,615],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [341,615],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [342,620],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [342,620],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [342,625],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [342,625],direct=-1,det=0)
-'''
-
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [535,520],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [513,540],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [523,558],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [514,602],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [414,643],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [458,493],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [465,527],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [424,707],direct=1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [535,520],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [513,540],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [523,558],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [514,602],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [414,643],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [458,493],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [465,527],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [424,707],direct=-1,det=0)
-
-#left
-xmcdl_1 = producedata(list_images_l,list_images_r, pixel_list, 4, [341,620],direct=-1,det=0)
-xmcdl_2=producedata(list_images_l,list_images_r, pixel_list, 4, [652,501],direct=1,det=0)
-xmcdl_4 =producedata(list_images_l,list_images_r, pixel_list, 4, [829,620],direct=-1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [534,526],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [534,526],direct=-1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [530,542],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [530,542],direct=-1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [517,582],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [517,582],direct=1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [524,634],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [524,634],direct=1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [485,609],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [485,609],direct=1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [488,580],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [488,580],direct=-1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [474,539],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [474,539],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [455,505],direct=-1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [455,505],direct=1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [726,722],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [726,722],direct=-1,det=0)
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [248,592],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [248,592],direct=-1,det=0)
-
-
-producedata(list_images_l,list_images_r, pixel_list, 4, [345,591],direct=1,det=0)
-producedata(list_images_l,list_images_r, pixel_list, 4, [345,591],direct=-1,det=0)
-#ycoords = np.arange(710, 800,5)
-#xcoords= np.ones(len(ycoords))*348
-#for i in range(len(xcoords)):
-	#producedata(list_images_l,list_images_r,pixel_list,15,[752, 537])
-#	producedata(list_images_l,list_images_r,pixel_list,15,[xcoords[i], ycoords[i]])
-#	print 'point #',i
