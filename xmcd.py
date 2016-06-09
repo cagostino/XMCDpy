@@ -1,9 +1,17 @@
 #lets gooooo. Author: Christopher Agostino
+import sys
 import numpy as np
 import os
 import scipy
 import gdal
 import matplotlib.pyplot as plt
+from PySide.QtGui import *
+from PySide.QtCore import QTimer, SIGNAL, SLOT
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import mpl_toolkits.mplot3d.axes3d as p3
+from mpl_toolkits.mplot3d import Axes3D
+
 from lmfit.models import LorentzianModel
 from lmfit.models import GaussianModel
 from lmfit.models import VoigtModel
@@ -13,11 +21,52 @@ from numpy import trapz
 from scipy.integrate import simps
 plt.rc('text',usetex=True)
 #make these plots look dank
-plt.rc('font',family='serif')
-l = os.listdir("left/")
-r =os.listdir("right/")
-l.sort()
-r.sort()
+#plt.rc('font',family='serif')
+#l = os.listdir("left/")
+#r =os.listdir("right/")
+#l.sort()
+#r.sort()
+app =QApplication.instance()
+if not app:
+    app = QApplication(sys.argv)
+w = QWidget()
+w.resize(640,480)
+w.setWindowTitle('XMCD')
+button1 = QPushButton('Start', w)
+button1.resize(button1.sizeHint())
+button1.move(280, 240)
+
+button2= QPushButton('Select Left',w)
+button2.resize(button2.sizeHint())
+button2.move(240,200)
+
+button3= QPushButton('Select Right',w)
+button3.resize(button3.sizeHint())
+button3.move(330,200)
+
+label1 = QLabel(w)
+label1.setText('XMCD')
+label1.move(310, 05)
+
+textbox1 = QLineEdit(w)
+textbox1.move(125, 100)
+textbox1.resize(200, 40)
+textbox1.setText('Enter X')
+
+textbox2 = QLineEdit(w)
+textbox2.move(325, 100)
+textbox2.resize(200, 40)
+textbox2.setText('Enter Y')
+
+button2= QPushButton('Set Coords',w)
+button2.resize(button2.sizeHint())
+button2.move(280,170)
+
+
+####
+###drop down menu for save file
+###
+####
 
 def read_dat(filename):
 	fil = np.loadtxt(filename, skiprows=1)
@@ -38,20 +87,20 @@ def assign_images(lst = None):
 			new_array_r.append(scipy.array(new.GetRasterBand(1).ReadAsArray()))
 			file_list_r.append(fil)	
 	return [file_list_l,file_list_r, new_array_l,new_array_r]
-list_files_l,list_files_r , list_images_l, list_images_r = assign_images()
-photon_energies = []
-for i in list_files_l:
-	if 'tif' in i:
-		if '_R' in i:
-			i = i.replace("_R.tif","")	
-		else:
-			i=i.replace(".tif",'')
-		if "_" in i:
-			i=i.replace("_",'.')
+#list_files_l,list_files_r , list_images_l, list_images_r = assign_images()
+#photon_energies = []
+#for i in list_files_l:
+#	if 'tif' in i:
+#		if '_R' in i:
+#			i = i.replace("_R.tif","")	
+#		else:
+#			i=i.replace(".tif",'')
+#		if "_" in i:
+#			i=i.replace("_",'.')
 
 
-	photon_energies.append(float(i))
-gc.collect()
+#	photon_energies.append(float(i))
+#gc.collect()
 
 def pick_domain_wall_point(image):
 	plt.imshow(image,cmap='Greys_r')
@@ -124,9 +173,9 @@ def calculate_nth_average_intensity(image_left,image_right,coordinate, size, num
 		intensities_left.append(image_left[y][x+direct*count_x+direct*size*(number-1)])
 		count_y = 1
 		while count_y < size:
-			intensities_right.append(image_right[y+count_y][x+direct*count_x+direct*size*(number-1)])
-		    intensities_left.append(image_left[y+count_y][x+direct*count_x+direct*size*(number-1)])
-			count_y+=1
+		  intensities_right.append(image_right[y+count_y][x+direct*count_x+direct*size*(number-1)])
+		  intensities_left.append(image_left[y+count_y][x+direct*count_x+direct*size*(number-1)])
+		  count_y+=1
 		count_x +=1 	
 	intens_left=np.sum(intensities_left)/abs(count_x*count_y)#-norm_l
 	intens_right = np.sum(intensities_right)/(abs(count_x)*count_y)#-norm_r
@@ -282,3 +331,7 @@ def producedata(image_list_l,image_list_r, pixel_list,number,point,direct=1,det=
 			del norm_l
 			del norm_r
 	return totxmcd
+	
+w.show()
+
+sys.exit(app.exec_())
